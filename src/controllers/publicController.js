@@ -1,8 +1,11 @@
 import {loginmodel} from '../models/publicModel.js';
 import bcrypt from 'bcrypt';
 import jwt from "jsonwebtoken";
+import dotenv from 'dotenv';
 
-const SECRET_KEY =  process.env.JWT_SECRET 
+dotenv.config();
+
+const SECRET_KEY = process.env.JWT_SECRET_KEY;
 
 const login = async (req,res)=>{
 
@@ -14,14 +17,14 @@ const login = async (req,res)=>{
         if(!result){
             res.status(400).json({error: "User not found"});
         }
-        isValid = await bcrypt.compare(password, result.password);
+        const isValid = await bcrypt.compare(password, result.password);
 
         if(!isValid){
             res.status(200).json({message: "invalid password"});
         }
 
         const token = jwt.sign(
-            {userId: result.id, role: result.role},
+            {userId: result.user_id, role: result.role},
            SECRET_KEY,
             {expiresIn: '1h'}
         );

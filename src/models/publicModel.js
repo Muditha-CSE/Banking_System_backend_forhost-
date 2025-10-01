@@ -1,10 +1,15 @@
 import pool from '../../database.js';
 
 export const loginmodel = async (username)=>{
-    console.log("Reached login model");
     const {rows} = await pool.query(
-        'select * from login_authenticator where username=$1',[username]
+        'select * from login_authentication where username=$1',[username]
     );
     return rows[0];
 }
 
+export const searchUser = async (username)=>{
+    const {rows} = await pool.query(
+        'select * from login_authentication where username=$1',[username]
+    );
+    return rows[0];
+}

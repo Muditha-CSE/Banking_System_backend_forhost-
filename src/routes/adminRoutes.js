@@ -5,7 +5,9 @@ import adminController from '../controllers/adminController.js';
 
 const router = Router();
 
-router.get('/addAdmin',adminController.addAdmin);
+router.post('/addAdmin',adminController.addAdmin);
+router.post('/addAgent',adminController.addAgent);
+
 
 export default router;
 

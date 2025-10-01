@@ -1,8 +1,12 @@
 import jwt from "jsonwebtoken";
+import dotenv from 'dotenv';
 
-const SECRET_KEY =  process.env.JWT_SECRET;
+dotenv.config();
 
-export const authenticateRole = (allowedRoles)=> (req, res, next) => {
+
+const SECRET_KEY =  process.env.JWT_SECRET_KEY;
+
+const authenticateRole = (allowedRoles)=> (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
 
@@ -21,3 +25,5 @@ export const authenticateRole = (allowedRoles)=> (req, res, next) => {
         next();
     });
 };
+
+export default { authenticateRole };
