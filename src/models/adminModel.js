@@ -1,7 +1,7 @@
 import pool from '../../database.js'
 
 
-export const addNewAdminToLog = async (username,password,name,email,phone,NIC)=>{
+export const addNewAdminToLog = async (username,password,name,email,phone,NIC,created_by)=>{
 
     const client = await pool.connect(); 
 
@@ -13,7 +13,7 @@ export const addNewAdminToLog = async (username,password,name,email,phone,NIC)=>
         const user_id = rows[0].user_id;
 
         await client.query(
-            'insert into admins (user_id,name,email,phone,NIC) values ($1,$2,$3,$4,$5)',[user_id,name,email,phone,NIC]
+            'insert into admins (user_id,name,email,phone,NIC,created_by) values ($1,$2,$3,$4,$5,$6)',[user_id,name,email,phone,NIC,created_by]
         );
         await client.query('COMMIT');
     }catch (error) {
@@ -24,7 +24,7 @@ export const addNewAdminToLog = async (username,password,name,email,phone,NIC)=>
     }
 };
 
-export const addNewAgentToLog = async (username,password,name,email,phone,NIC)=>{
+export const addNewAgentToLog = async (username,password,name,email,phone,NIC,created_by,branch_id)=>{
 
     const client = await pool.connect()
     try{
@@ -35,7 +35,7 @@ export const addNewAgentToLog = async (username,password,name,email,phone,NIC)=>
         const user_id = rows[0].user_id;
 
         await client.query(
-            'insert into agents (user_id,name,email,phone,NIC) values ($1,$2,$3,$4,$5)',[user_id,name,email,phone,NIC]
+            'insert into agents (user_id,name,email,phone,NIC,created_by,branch_id) values ($1,$2,$3,$4,$5,$6,$7)',[user_id,name,email,phone,NIC,created_by,branch_id]
         );
         await client.query('COMMIT');
     }catch (error) {

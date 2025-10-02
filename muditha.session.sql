@@ -10,10 +10,11 @@ CREATE TABLE login_authentication (
 
 --@block
 insert into login_authentication (username, password, role) values
-('admin', 'admin123', 'admin'),
-('agent1', 'agent123', 'agent'),
-('agent2', 'agent123', 'agent');
+('muditha', '$2b$10$YjKwxQsrZNKqmInX7/q.s.dYe13DD7Zjg1NzOiZGkQcouy5Fix5Dy', 'admin');
 
+--@block 
+insert into admins (name, email, phone, user_id, NIC,created_by) values
+('muditha','mudithja@gmail.com','0771234567',49,'123456789V',49);
 --@block
 select * from login_authentication;
 --@block
@@ -56,7 +57,7 @@ ALTER TABLE admins
 ADD COLUMN NIC VARCHAR(12) NOT NULL UNIQUE;
 
 --@block
-TRUNCATE TABLE  agents;
+TRUNCATE TABLE  login_authentication cascade;
 
 --@block
 create table customers(
@@ -94,3 +95,39 @@ CREATE TABLE customers(
     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+--@block
+alter table admins
+drop column created_by;
+--@block
+ALTER TABLE admins 
+add column created_by INT references login_authentication(user_id) NOT NULL;
+
+--@block
+create table branches (
+    branch_id SERIAL PRIMARY KEY,
+    branch_name VARCHAR(100) NOT NULL,
+    branch_address VARCHAR(255) NOT NULL,
+    telephone_no VARCHAR(15) NOT NULL UNIQUE,
+    working_hours_start TIME NOT NULL,
+    working_hours_end TIME NOT NULL
+);
+
+--@block
+
+ALTER TABLE customers
+ADD column branch_id INT references branches(branch_id) NOT NULL;
+
+--@block
+ALTER TABLE agents
+add column branch_id INT references branches(branch_id) NOT NULL;
+
+--@block
+insert into branches (branch_name, branch_address, telephone_no, working_hours_start, working_hours_end) values
+('Colombo Main Branch', '123 Main St, Colombo', '0112345678', '09:00', '17:00');
+
+--@block
+select * from branches;
+
+--@block
+select * from customers;
