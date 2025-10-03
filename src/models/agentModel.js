@@ -22,3 +22,10 @@ export const getAgentBranch = async(agent_id)=>{
     );
     return rows[0].branch_id;
 };
+
+export const searchCustomerByNIC = async (username) => {
+    const { rows } = await pool.query(
+        'select * from customers where NIC=$1', [username]
+    );
+    return rows[0];
+};
