@@ -18,7 +18,7 @@ export const createAccount = async ({
         // Start transaction
         await client.query('BEGIN');
 
-        // 1) Get customer DOB (and optionally ensure customer exists)
+        // 1) Get customer DOB (and optionally ensure customer exists)....
         const customerRes = await client.query(
             'SELECT DOB FROM customers WHERE customer_id = $1',
             [customer_id]
