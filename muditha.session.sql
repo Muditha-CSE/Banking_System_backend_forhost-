@@ -172,6 +172,9 @@ CREATE TABLE joint_plans(
 	interest_rate DECIMAL (2, 2) NOT NULL
 );
 
+insert into joint_plans (plan_id, plan_name, min_age, min_balance,interest_rate) values
+('J0001', 'joint', '18', '0','0.11');
+
 --@block
 CREATE TABLE joint_account(
 	account_no CHAR(16) PRIMARY KEY REFERENCES accounts(account_no),
@@ -188,3 +191,21 @@ CREATE TABLE acc_holders (
     role roles NOT NULL,
     PRIMARY KEY (account_no, customer_id)
 );
+
+CREATE TABLE fixed_deposit_plans(
+	fd_plan_id CHAR(2) PRIMARY KEY,
+	months CHAR(2) NOT NULL,
+	interest_rate DECIMAL(2, 2) NOT NULL
+);
+
+CREATE TABLE fixed_deposit_account(
+	fd_account_no SERIAL PRIMARY KEY,
+	account_no INT REFERENCES accounts(account_no),
+	fd_plan_id CHAR(2) NOT NULL REFERENCES fixed_deposit_plans(fd_plan_id),
+	amount DECIMAL (10, 2) NOT NULL,
+	start_date TIMESTAMP,
+	end_date TIMESTAMP
+);
+
+insert into fixed_deposit_plans (fd_plan_id, months, interest_rate) values
+('J0001','12','0.11');
