@@ -1,4 +1,4 @@
-import { createSavingsAccount } from '../models/customerModel';
+import { createSavingsAccount,createJointAccount } from '../models/customerModel';
 
 export const addSevAccount = async (req, res) => {
     const agent_id = req.user?.userId; // still validate ownership elsewhere if required
@@ -19,6 +19,47 @@ export const addSevAccount = async (req, res) => {
         if (msg.startsWith('Insufficient') || msg.startsWith('Customer age') || msg.startsWith('Plan not found') || msg.startsWith('Customer not found') || msg.startsWith('Invalid')) {
             return res.status(400).json({ message: msg });
         }
+        console.error(err);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+
+export const addJointAccount = async (req, res) => {
+    // const agent_id = req.user?.userId; // use this if you want ownership/branch checks later
+    const { balance, active_status, plan_id, holders, last_transaction_time, last_transaction_id } = req.body;
+
+    try {
+        const { accountNo, insertedHolders } = await createJointAccount({
+            balance,
+            active_status,
+            plan_id,
+            holders,
+            last_transaction_time,
+            last_transaction_id
+        });
+
+        return res.status(201).json({
+            message: 'Joint account created successfully',
+            accountNo,
+            holders: insertedHolders
+        });
+
+    } catch (err) {
+        const msg = err.message || 'Server error';
+
+        // classify known business validation errors
+        if (
+            msg.startsWith('Insufficient') ||
+            msg.startsWith('Customer') ||
+            msg.startsWith('Plan not found') ||
+            msg.startsWith('holders') ||
+            msg.startsWith('Invalid') ||
+            msg.startsWith('At least one')
+        ) {
+            return res.status(400).json({ message: msg });
+        }
+
         console.error(err);
         return res.status(500).json({ message: 'Internal server error' });
     }

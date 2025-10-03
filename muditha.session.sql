@@ -162,3 +162,29 @@ CREATE TABLE savings_acccount(
 	customer_id CHAR(7) NOT NULL REFERENCES customer(customer_id),
 	plan_id CHAR(5) REFERENCES savings_plans(plan_id)
 );
+
+--@block
+CREATE TABLE joint_plans(
+	plan_id CHAR(5) PRIMARY KEY,
+	plan_name VARCHAR(25),
+	min_age CHAR(2),
+	min_balance DECIMAL (5, 2) NOT NULL,
+	interest_rate DECIMAL (2, 2) NOT NULL
+);
+
+--@block
+CREATE TABLE joint_account(
+	account_no CHAR(16) PRIMARY KEY REFERENCES accounts(account_no),
+	plan_id CHAR(5) REFERENCES joint_plans(plan_id)
+);
+
+
+--@block
+CREATE TYPE roles AS ENUM ('primary', 'joint', 'nominee');
+
+CREATE TABLE acc_holders (
+    account_no INT REFERENCES accounts(account_no) ON DELETE CASCADE,
+    customer_id INT REFERENCES customers(customer_id) ON DELETE CASCADE,
+    role roles NOT NULL,
+    PRIMARY KEY (account_no, customer_id)
+);
