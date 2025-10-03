@@ -1,6 +1,6 @@
 import pool from '../../database.js';
 
-export const createAccount = async ({
+export const createSavingsAccount = async ({
     customer_id,
     balance,
     active_status,

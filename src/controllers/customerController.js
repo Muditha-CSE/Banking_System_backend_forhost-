@@ -1,11 +1,11 @@
-import { createAccount } from '../models/customerModel';
+import { createSavingsAccount } from '../models/customerModel';
 
-export const addAccount = async (req, res) => {
+export const addSevAccount = async (req, res) => {
     const agent_id = req.user?.userId; // still validate ownership elsewhere if required
     const { customer_id, balance, active_status, plan_id } = req.body;
 
     try {
-        const accountNo = await createAccount({
+        const accountNo = await createSavingsAccount({
             customer_id,
             balance,
             active_status,

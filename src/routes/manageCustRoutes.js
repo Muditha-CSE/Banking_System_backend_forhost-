@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { addAccount } from "../controllers/customerController.js";
+import { addSevAccount } from "../controllers/customerController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = Router();
@@ -8,7 +8,7 @@ const router = Router();
 router.post(
     "/addservingsaccount",
     authMiddleware.authenticateRole(["agent"]),
-    addAccount
+    addSevAccount
 );
 
 export default router;
