@@ -131,3 +131,34 @@ select * from branches;
 
 --@block
 select * from customers;
+
+
+--@block
+CREATE TABLE accounts(
+	account_no SERIAL PRIMARY KEY,
+	created_date TIMESTAMP,
+	balance DECIMAL(10, 2) NOT NULL,
+	active_status BOOLEAN NOT NULL,
+	last_transaction_time TIMESTAMP,
+	last_transaction_id CHAR(10)
+);
+
+--@block
+CREATE TABLE savings_plans(
+	plan_id CHAR(5) PRIMARY KEY,
+	plan_name VARCHAR(25) NOT NULL,
+	min_age CHAR(2) NOT NULL,
+	max_age CHAR(2),
+	min_balance DECIMAL(5, 2) NOT NULL,
+	interest_rate DECIMAL(2, 2) NOT NULL
+);
+
+insert into savings_plans (plan_id, plan_name, min_age, max_age, min_balance,interest_rate) values
+('S0001', 'Adalt', '18', '60', '0','0.11');
+
+--@block
+CREATE TABLE savings_acccount(
+	account_no INT PRIMARY KEY REFERENCES accounts(account_no),
+	customer_id CHAR(7) NOT NULL REFERENCES customer(customer_id),
+	plan_id CHAR(5) REFERENCES savings_plans(plan_id)
+);
