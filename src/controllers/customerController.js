@@ -1,4 +1,4 @@
-import { createSavingsAccount,createJointAccount } from '../models/customerModel';
+import { createSavingsAccount, createJointAccount, createFixedDepositIfNone } from '../models/customerModel';
 
 export const addSevAccount = async (req, res) => {
     const agent_id = req.user?.userId; // still validate ownership elsewhere if required
@@ -60,6 +60,32 @@ export const addJointAccount = async (req, res) => {
             return res.status(400).json({ message: msg });
         }
 
+        console.error(err);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+export const addFixedDeposit = async (req, res) => {
+
+    const { account_no, fd_plan_id, amount } = req.body;
+
+    try {
+        const fd = await createFixedDepositIfNone({
+            account_no: Number(account_no),
+            fd_plan_id,
+            amount
+        });
+        return res.status(201).json({ message: 'Fixed deposit created', fd });
+    } catch (err) {
+        const msg = err.message || 'Server error';
+        if (
+            msg.startsWith('Invalid') ||
+            msg.startsWith('FD plan not found') ||
+            msg.startsWith('Account not found') ||
+            msg.startsWith('An active fixed deposit')
+        ) {
+            return res.status(400).json({ message: msg });
+        }
         console.error(err);
         return res.status(500).json({ message: 'Internal server error' });
     }

@@ -104,6 +104,7 @@ export const createSavingsAccount = async ({
 
 import pool from '../../database.js';
 
+
 /**
  * Create a joint account:
  *  - validate plan (min_balance, min_age)
@@ -256,6 +257,81 @@ export const createJointAccount = async ({
         // commit
         await client.query('COMMIT');
         return { accountNo, insertedHolders };
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { }
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+
+
+export const createFixedDepositIfNone = async ({
+    account_no,
+    fd_plan_id,
+    amount
+}) => {
+    const client = await pool.connect();
+    try {
+        const numericAmount = Number(amount);
+        if (Number.isNaN(numericAmount) || numericAmount <= 0) {
+            throw new Error('Invalid amount');
+        }
+
+        await client.query('BEGIN');
+
+        // 1) ensure account exists
+        const accRes = await client.query(
+            'SELECT account_no FROM accounts WHERE account_no = $1',
+            [account_no]
+        );
+        if (accRes.rowCount === 0) {
+            throw new Error(`Account not found: ${account_no}`);
+        }
+
+        // 2) check for any active FD that uses this account
+        // Active = end_date IS NULL OR end_date > NOW()
+        const existingFd = await client.query(
+            `SELECT fd_account_no 
+       FROM fixed_deposit_account 
+       WHERE account_no = $1 AND (end_date IS NULL OR end_date > NOW())
+       LIMIT 1`,
+            [account_no]
+        );
+        if (existingFd.rowCount > 0) {
+            throw new Error(`An active fixed deposit already exists for account ${account_no}`);
+        }
+
+        // 3) load FD plan and months
+        const planRes = await client.query(
+            'SELECT fd_plan_id, months FROM fixed_deposit_plans WHERE fd_plan_id = $1',
+            [fd_plan_id]
+        );
+        if (planRes.rowCount === 0) {
+            throw new Error(`FD plan not found for id=${fd_plan_id}`);
+        }
+        const months = Number(planRes.rows[0].months);
+        if (Number.isNaN(months) || months <= 0) {
+            throw new Error('Invalid plan months value');
+        }
+
+        // 4) insert FD, compute end_date using SQL interval (DB time)
+        const insertQ = `
+      INSERT INTO fixed_deposit_account
+        (account_no, fd_plan_id, amount, start_date, end_date)
+      VALUES ($1, $2, $3, NOW(), NOW() + (INTERVAL '1 month' * $4))
+      RETURNING fd_account_no, account_no, fd_plan_id, amount, start_date, end_date
+    `;
+        const insertRes = await client.query(insertQ, [
+            account_no,
+            fd_plan_id,
+            numericAmount,
+            months
+        ]);
+
+        await client.query('COMMIT');
+        return insertRes.rows[0];
     } catch (err) {
         try { await client.query('ROLLBACK'); } catch (_) { }
         throw err;

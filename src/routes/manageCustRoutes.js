@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { addSevAccount, addJointAccount } from "../controllers/customerController.js";
+import { addSevAccount, addJointAccount, addFixedDeposit } from "../controllers/customerController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = Router();
@@ -13,6 +13,12 @@ router.post(
 
 router.post(
     "/addjointaccount",
+    authMiddleware.authenticateRole(["agent"]),
+    addJointAccount
+);
+
+router.post(
+    "/addfixeddeposit",
     authMiddleware.authenticateRole(["agent"]),
     addJointAccount
 );
