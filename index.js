@@ -6,7 +6,11 @@ import publicRoutes from './src/routes/publicRoutes.js';
 
 const app = express();
 const port = 3000;
-app.use(express.json());
+app.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  express.json()(req, res, next);
+});
+
 
 app.use('/api/admin',adminRoutes);
 app.use('/api/agent',agentRoutes);

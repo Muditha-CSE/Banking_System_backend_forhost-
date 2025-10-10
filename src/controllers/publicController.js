@@ -1,7 +1,9 @@
 import {loginmodel} from '../models/publicModel.js';
+import {logSystemActivity} from '../models/systemModel.js';
 import bcrypt from 'bcrypt';
 import jwt from "jsonwebtoken";
 import dotenv from 'dotenv';
+import pool from '../../database.js';
 
 dotenv.config();
 
@@ -10,17 +12,16 @@ const SECRET_KEY = process.env.JWT_SECRET_KEY;
 const login = async (req,res)=>{
 
     const {username, password} = req.body;
-
     try {
-        const result = await loginmodel(username);  // ✅ call the model function
+        const result = await loginmodel(pool,username);  
         
         if(!result){
-            res.status(400).json({error: "User not found"});
+           return res.status(400).json({error: "User not found"});
         }
         const isValid = await bcrypt.compare(password, result.password);
 
         if(!isValid){
-            res.status(200).json({message: "invalid password"});
+           return res.status(200).json({message: "invalid password"});
         }
 
         const token = jwt.sign(
@@ -28,7 +29,8 @@ const login = async (req,res)=>{
            SECRET_KEY,
             {expiresIn: '1h'}
         );
-        res.status(200).json({ message: "Login successful", token });
+        await logSystemActivity(pool, 'LOGIN', `User ${username} logged in`, result.user_id);
+        return res.status(200).json({ message: "Login successful", token });
     } catch (err) {
         console.error(err);
         res.status(500).json({error: err.message});
