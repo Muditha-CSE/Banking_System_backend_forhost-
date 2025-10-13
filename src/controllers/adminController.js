@@ -18,6 +18,22 @@ const addAdmin = async (req,res)=>{
     
     try{
         await client.query('BEGIN');
+        if(password.length < 8){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Password must be at least 8 characters long"});
+        }
+        if(NIC.length !== 12 && NIC.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
+        if(phone.length !== 10 || !phone.startsWith('07')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid phone number"});
+        }
         const result = await searchUser(client,username);
         if(!result){
             await addNewAdminToLog(client,username,hashedPassword,name,email,phone,NIC,created_by);
@@ -44,6 +60,22 @@ const addAgent = async (req,res)=>{
     
     try{
         await client.query('BEGIN');
+        if(password.length < 8){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Password must be at least 8 characters long"});
+        }
+        if(NIC.length !== 12 && NIC.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
+        if(phone.length !== 10 || !phone.startsWith('07')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid phone number"});
+        }
         const result = await searchUser(pool,username);
         if(!result){
             await addNewAgentToLog(pool,username,hashedPassword,name,email,phone,NIC,created_by,branch_id);
@@ -69,6 +101,10 @@ const addBranch = async (req,res)=>{
 
     try{
         await client.query('BEGIN');
+        if(telephone_no.length !== 10 || !telephone_no.startsWith('07')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid phone number"});
+        }
         const branchExists =await branchChecker(client,branch_name);
         if(branchExists){
             return res.status(400).json({message: "Branch name already exists"});
@@ -135,6 +171,14 @@ const customerActivity = async (req,res)=>{
     const {nic} = req.params;
 
     try{
+        if(nic.length !== 12 && nic.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
         const getCustomerId = await customerId(pool,nic);
         if(!getCustomerId){
             return res.status(400).json({message: "Customer not found"});
@@ -153,6 +197,14 @@ const customerActivityForAcc = async (req,res)=>{
     const acc_no = parseInt(account_no,10);
 
     try{
+        if(nic.length !== 12 && nic.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
         const getCustomerId = await customerId(pool,nic);
         if(!getCustomerId){
             return res.status(400).json({message: "Customer not found"});

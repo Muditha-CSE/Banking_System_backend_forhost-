@@ -44,11 +44,11 @@ export const getMinBalance = async(client,plan_id)=>{
     return rows[0].min_balance;
 };
 
-export const createSavingsAccount = async(client,users,initial_deposit,agent_id,branch_id,plan_id,customer_created)=>{
+export const createSavingsAccount = async(client,users,initial_deposit,agent_id,branch_id,plan_id,created_customer)=>{
 
     const {rows} = await client.query(
         'insert into savingsAccounts (plan_id,branch_id,created_by,balance,created_customer_nic) values ($1,$2,$3,$4,$5) returning account_no',
-        [plan_id,branch_id,agent_id,initial_deposit,customer_created]
+        [plan_id,branch_id,agent_id,initial_deposit,created_customer]
     );
     const account_no = rows[0].account_no;
 

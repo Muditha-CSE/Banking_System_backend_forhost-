@@ -16,6 +16,18 @@ const addCustomer = async (req,res)=>{
 
     try{
         await client.query('BEGIN');
+         if(NIC.length !== 12 && NIC.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
+        if(phone.length !== 10 || !phone.startsWith('07')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid phone number"});
+        }
         const branch_id = await getAgentBranch(client,agent_id);
         const result = await searchCustomer(client,NICs);
 
@@ -37,7 +49,7 @@ const addCustomer = async (req,res)=>{
 };
 
 const addSavingsAccount = async (req,res)=>{
-    const {customer_created,users,initial_deposit,plan_id} = req.body;
+    const {created_customer,users,initial_deposit,plan_id} = req.body;
     const agent_id = req.user.userId;
     const NICs = users.map(user => user.nic);
     const client = await pool.connect();
@@ -57,7 +69,18 @@ const addSavingsAccount = async (req,res)=>{
         if (!Array.isArray(users) || users.length === 0) {
             return res.status(400).json({ message: "Users array is required" });
         }
-
+        const nicSet = new Set();
+        for (const nic of NICs) {
+            if(nic.length !== 12 && nic.length !== 11){
+                nicSet.add(nic);
+            }
+            else if(nic.length === 11 && !nic.endsWith('V')){
+                nicSet.add(nic);
+            }
+        }
+        if(nicSet.size > 0){
+            return res.status(400).json({message: `The following NICs have invalid format or length: ${Array.from(nicSet).join(', ')}`});
+        }
         const checkCustomer = await searchCustomer(client,NICs);
         const branch_id = await getAgentBranch(client,agent_id);
         const ageRange = await getMinAge(client,plan_id);
@@ -85,7 +108,7 @@ const addSavingsAccount = async (req,res)=>{
             return res.status(400).json({message: `Initial deposit should be at least ${min_balance}`});
         }
 
-        const account_no = await createSavingsAccount(client,users,initial_deposit,agent_id,branch_id,plan_id,customer_created);
+        const account_no = await createSavingsAccount(client,users,initial_deposit,agent_id,branch_id,plan_id,created_customer);
         await logSystemActivity(client, 'CREATE_SAVINGS_ACCOUNT', `Savings account ${account_no} created by agent ID ${agent_id}`, agent_id);
         await logSystemActivity(client, 'DEPOSIT', `Amount ${initial_deposit} deposited to account ${account_no} by agent ID ${agent_id}`, agent_id);
         await client.query('COMMIT');
@@ -110,6 +133,14 @@ const addFixedDepositeAccount = async (req,res)=>{
 
     try{
         await client.query('BEGIN');
+        if(NIC.length !== 12 && NIC.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(NIC.length === 11 && !NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
         const accountCheck = await accountChecker(client,account_no,NIC);
         const getUserAge = await searchCustomer(client,[NIC]);
         if(getUserAge.ok === true){
@@ -163,6 +194,14 @@ const makeDeposit = async (req,res)=>{
     
     try{
         await client.query('BEGIN');
+        if(customer_nic.length !== 12 && customer_nic.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(customer_nic.length === 11 && !customer_nic.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
         const accountCheck = await accountChecker(client,account_no,customer_nic);
         if(accountCheck === 0){
             await client.query('ROLLBACK');
@@ -197,7 +236,14 @@ const makeWithdraw = async (req,res)=>{
     
     try{
         await client.query('BEGIN');
-
+        if(customer_nic.length !== 12 && customer_nic.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC length"});
+        }
+        else if(customer_nic.length === 11 && !customer_nic.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid NIC format"});
+        }
         const accountCheck = await accountChecker(client,account_no,customer_nic);
         if(accountCheck === 0){
             await client.query('ROLLBACK');
@@ -241,6 +287,14 @@ const accToAccTransfer = async (req,res)=>{
     const client = await pool.connect();
     try{
         await client.query('BEGIN');
+        if(sender_NIC.length !== 12 && sender_NIC.length !== 11){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid sender NIC length"});
+        }
+        else if(sender_NIC.length === 11 && !sender_NIC.endsWith('V')){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Invalid sender NIC format"});
+        }
         const senderAccount = await accountChecker(client,sender_account_no,sender_NIC);
         if(senderAccount === 0){
             await client.query('ROLLBACK');
