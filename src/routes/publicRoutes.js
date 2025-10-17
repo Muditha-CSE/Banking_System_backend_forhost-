@@ -4,7 +4,9 @@ import publicController from '../controllers/publicController.js';
 
 const router = Router();
 
-router.post('/login',publicController.login);
+router.post('/loginofficers',publicController.login);
+router.post('/logincustomer',publicController.logincustomer);
+
 
 export default router;
 

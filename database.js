@@ -1,17 +1,21 @@
 // db.js
 import pkg from 'pg';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 const { Pool } = pkg;
 
-// Create a pool of connections
+// Create a pool of connections using environment variables
 const pool = new Pool({
-    user: 'muditha',           // your PostgreSQL username
-    host: 'localhost',         // usually localhost
-    database: 'banking_db',    // the database you want to connect
-    password: 'Muditha21250@pcc',  // the password for your user
-    port: 5432,                // default PostgreSQL port
-    max: 20,                   // max number of connections in pool
-    idleTimeoutMillis: 30000,  // close idle clients after 30s
-    connectionTimeoutMillis: 2000 // timeout for acquiring a client
+    user: process.env.DB_USER || 'muditha',
+    host: process.env.DB_HOST || 'localhost',
+    database: process.env.DB_DATABASE || 'banking_db',
+    password: process.env.DB_PASSWORD || 'Muditha21250@pcc',
+    port: parseInt(process.env.DB_PORT) || 5432,
+    max: parseInt(process.env.DB_MAX_CONNECTIONS) || 20,
+    idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000,
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 2000
 });
 
 // Test the connection
