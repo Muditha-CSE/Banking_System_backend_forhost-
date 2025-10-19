@@ -1,68 +1,341 @@
-export const customerDetails = async(pool,nic)=>{
-    const result = await pool.query(
-        `SELECT 
-            ah.account_no,
-            ah.role,
-            s.balance as savings_balance,
-            s.active_status as savings_status,
-            f.fd_account_no,
-            f.deposit_amount as fd_amount,
-            f.start_date as fd_start_date,
-            (f.start_date + (p.plan_duration_months::text || ' months')::interval) as fd_maturity_date,
-            f.status as fd_status,
-            f.last_interest_date as fd_last_interest_date,
-            f.fd_plan_id as fd_plan_id,
-            p.plan_name as fd_plan_name,
-            p.plan_duration_months as fd_duration_months,
-            p.interest_rate as fd_interest_rate,
-            atas.transaction_id as transfer_sent_id,
-            atas.amount as transfer_sent_amount,
-            atas.receiver_account_no as transfer_sent_to,
-            atas.transaction_done_by as transfer_sent_by,
-            atas.transaction_date as transfer_sent_date,
-            atar.transaction_id as transfer_received_id,
-            atar.amount as transfer_received_amount,
-            atar.sender_account_no as transfer_received_from,
-            atar.transaction_done_by as transfer_received_by,
-            atar.transaction_date as transfer_received_date,
-            athd.transaction_id as deposit_id,
-            athd.amount as deposit_amount,
-            athd.transaction_done_by as deposit_by,
-            athd.transaction_date as deposit_date,
-            athw.transaction_id as withdraw_id,
-            athw.amount as withdraw_amount,
-            athw.transaction_done_by as withdraw_by,
-            athw.transaction_date as withdraw_date,
-            ips.transaction_id as savings_interest_id,
-            ips.amount as savings_interest_amount,
-            ips.transaction_done_by as savings_interest_by,
-            ips.transaction_date as savings_interest_date,
-            ipf.transaction_id as fd_interest_id,
-            ipf.amount as fd_interest_amount,
-            ipf.transaction_done_by as fd_interest_by,
-            ipf.transaction_date as fd_interest_date
-        FROM accountHolders ah
-        LEFT JOIN savingsAccounts s ON ah.account_no = s.account_no
-        LEFT JOIN fixedDepositAccounts f ON ah.account_no = f.linked_account_no
-        LEFT JOIN fixedDepositsPlans p ON f.fd_plan_id = p.fd_plan_id
-        LEFT JOIN acc_to_acc_transactions atas ON ah.account_no = atas.sender_account_no
-        LEFT JOIN acc_to_acc_transactions atar ON ah.account_no = atar.receiver_account_no
-        LEFT JOIN acc_to_hand_transactions athd ON ah.account_no = athd.account_no AND athd.cash_direction='deposit'
-        LEFT JOIN acc_to_hand_transactions athw ON ah.account_no = athw.account_no AND athw.cash_direction='withdraw'
-    LEFT JOIN interest_payments ips ON ah.account_no = ips.savings_account_no AND ips.interest_type='savings'
-    LEFT JOIN interest_payments ipf ON ah.account_no = ipf.savings_account_no AND ipf.interest_type='fixed_deposit'
-        WHERE UPPER(ah.customer_nic) = UPPER($1)
-        ORDER BY ah.account_no, 
-            COALESCE(atas.transaction_date, atar.transaction_date, athd.transaction_date, athw.transaction_date, ips.transaction_date, ipf.transaction_date) DESC`,
-        [nic]
-    );
-    return result.rows;
+import pool from '../../database.js';
+
+export const createSavingsAccount = async ({
+    customer_id,
+    balance,
+    active_status,
+    plan_id,
+    last_transaction_time = null,
+    last_transaction_id = null
+}) => {
+    const client = await pool.connect();
+    try {
+        const numericBalance = Number(balance);
+        if (Number.isNaN(numericBalance)) {
+            throw new Error("Invalid balance value");
+        }
+
+        // Start transaction
+        await client.query('BEGIN');
+
+        // 1) Get customer DOB (and optionally ensure customer exists)....
+        const customerRes = await client.query(
+            'SELECT DOB FROM customers WHERE customer_id = $1',
+            [customer_id]
+        );
+        if (customerRes.rowCount === 0) {
+            throw new Error(`Customer not found with ID ${customer_id}`);
+        }
+
+        const dob = new Date(customerRes.rows[0].dob);
+        const today = new Date();
+        let age = today.getFullYear() - dob.getFullYear();
+        if (
+            today.getMonth() < dob.getMonth() ||
+            (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())
+        ) {
+            age--;
+        }
+
+        // 2) Get plan info
+        const planRes = await client.query(
+            'SELECT plan_id, min_balance, min_age, max_age FROM savings_plans WHERE plan_id = $1',
+            [plan_id]
+        );
+
+        if (planRes.rowCount === 0) {
+            throw new Error(`Plan not found for plan_id=${plan_id}`);
+        }
+
+        const plan = planRes.rows[0];
+        const minBalance = Number(plan.min_balance);
+        const minAge = Number(plan.min_age);
+        const maxAge = plan.max_age ? Number(plan.max_age) : null;
+
+        // 3) Validate balance and age
+        if (numericBalance < minBalance) {
+            throw new Error(`Insufficient balance. Minimum required is ${minBalance}`);
+        }
+
+        if (age < minAge || (maxAge && age > maxAge)) {
+            throw new Error(`Customer age ${age} does not fit plan age limits (${minAge} - ${maxAge ?? '∞'})`);
+        }
+
+        // 4) Insert into accounts and get account_no
+        const insertAccountQ = `
+      INSERT INTO accounts
+        (created_date, balance, active_status, last_transaction_time, last_transaction_id)
+      VALUES (NOW(), $1, $2, $3, $4)
+      RETURNING account_no
+    `;
+
+        const insertAccountRes = await client.query(insertAccountQ, [
+            numericBalance,
+            active_status,
+            last_transaction_time,
+            last_transaction_id
+        ]);
+
+        const accountNo = insertAccountRes.rows[0].account_no;
+        if (!accountNo) {
+            throw new Error('Failed to create account (no account_no returned)');
+        }
+
+        // 5) Insert into savings_accounts linking the account to the customer and plan
+        // Note: adjust table/column names/types if your DB uses different names
+        const insertSavingsLinkQ = `
+      INSERT INTO savings_accounts (account_no, customer_id, plan_id)
+      VALUES ($1, $2, $3)
+    `;
+
+        await client.query(insertSavingsLinkQ, [accountNo, customer_id, plan_id]);
+
+        // commit the whole transaction
+        await client.query('COMMIT');
+
+        return accountNo;
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* ignore rollback errors */ }
+        throw err;
+    } finally {
+        client.release();
+    }
 };
 
-export const checkAccounts = async(pool,nic)=>{
-    const {rows} = await pool.query(
-        'select * from accountHolders where UPPER(customer_nic) = UPPER($1)',
-        [nic]
-    );
-    return rows;
+import pool from '../../database.js';
+
+
+/**
+ * Create a joint account:
+ *  - validate plan (min_balance, min_age)
+ *  - validate holders (existence, age)
+ *  - insert into accounts -> get account_no
+ *  - insert into joint_account (account_no, plan_id)
+ *  - insert into acc_holders for each holder
+ *
+ * @param {Object} params
+ * @param {number} params.balance
+ * @param {boolean} params.active_status
+ * @param {string} params.plan_id
+ * @param {Array<{customer_id:number, role:string}>} params.holders
+ * @param {string|null} params.last_transaction_time
+ * @param {string|null} params.last_transaction_id
+ *
+ * @returns {Object} { accountNo, insertedHolders: [{customer_id, role}, ...] }
+ */
+export const createJointAccount = async ({
+    balance,
+    active_status,
+    plan_id,
+    holders = [],
+    last_transaction_time = null,
+    last_transaction_id = null
+}) => {
+    if (!Array.isArray(holders) || holders.length === 0) {
+        throw new Error('holders must be a non-empty array');
+    }
+
+    const client = await pool.connect();
+    try {
+        // numeric conversions
+        const numericBalance = Number(balance);
+        if (Number.isNaN(numericBalance)) throw new Error('Invalid balance value');
+
+        // begin transaction
+        await client.query('BEGIN');
+
+        // 1) load joint plan and its rules
+        const planRes = await client.query(
+            'SELECT plan_id, min_balance, min_age FROM joint_plans WHERE plan_id = $1',
+            [plan_id]
+        );
+        if (planRes.rowCount === 0) throw new Error(`Plan not found for plan_id=${plan_id}`);
+        const plan = planRes.rows[0];
+        const minBalance = Number(plan.min_balance);
+        const minAge = Number(plan.min_age);
+
+        if (Number.isNaN(minBalance) || Number.isNaN(minAge)) {
+            throw new Error('Invalid plan configuration (min_balance/min_age)');
+        }
+
+        // 2) validate overall balance against plan min_balance
+        if (numericBalance < minBalance) {
+            throw new Error(`Insufficient balance. Minimum required for this joint plan is ${minBalance}`);
+        }
+
+        // Helper to calculate age from DOB
+        const calcAge = (dobVal) => {
+            const dob = new Date(dobVal);
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            if (
+                today.getMonth() < dob.getMonth() ||
+                (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())
+            ) {
+                age--;
+            }
+            return age;
+        };
+
+        // Optional: ensure there's at least one primary holder in the input
+        const hasPrimary = holders.some(h => String(h.role).toLowerCase() === 'primary');
+        if (!hasPrimary) {
+            throw new Error('At least one holder must have role "primary"');
+        }
+
+        // 3) Validate each holder: ensure customer exists and age >= minAge
+        // Also check duplicates in supplied holders array
+        const seenIds = new Set();
+        for (const h of holders) {
+            if (!h || typeof h.customer_id === 'undefined' || h.customer_id === null) {
+                throw new Error('Each holder must include customer_id');
+            }
+            const cid = Number(h.customer_id);
+            if (Number.isNaN(cid)) throw new Error(`Invalid customer_id: ${h.customer_id}`);
+            if (seenIds.has(cid)) throw new Error(`Duplicate customer_id in holders list: ${cid}`);
+            seenIds.add(cid);
+
+            // fetch customer's DOB
+            const custRes = await client.query(
+                'SELECT customer_id, DOB FROM customers WHERE customer_id = $1',
+                [cid]
+            );
+            if (custRes.rowCount === 0) throw new Error(`Customer not found with ID ${cid}`);
+            const dobVal = custRes.rows[0].dob;
+            const age = calcAge(dobVal);
+            if (age < minAge) {
+                throw new Error(`Customer ${cid} (age ${age}) does not meet plan minimum age ${minAge}`);
+            }
+            // NOTE: no upper age limit in joint_plans per your schema; add if needed
+        }
+
+        // 4) Insert into accounts and get account_no
+        const insertAccountQ = `
+      INSERT INTO accounts (created_date, balance, active_status, last_transaction_time, last_transaction_id)
+      VALUES (NOW(), $1, $2, $3, $4)
+      RETURNING account_no
+    `;
+        const insertAccountRes = await client.query(insertAccountQ, [
+            numericBalance,
+            active_status,
+            last_transaction_time,
+            last_transaction_id
+        ]);
+        if (insertAccountRes.rowCount === 0) {
+            throw new Error('Failed to create account');
+        }
+        const accountNo = insertAccountRes.rows[0].account_no;
+
+        // 5) Insert into joint_account (link account to plan)
+        await client.query(
+            'INSERT INTO joint_account (account_no, plan_id) VALUES ($1, $2)',
+            [accountNo, plan_id]
+        );
+
+        // 6) Insert holders into acc_holders (prevent duplicates there too)
+        const insertedHolders = [];
+        for (const h of holders) {
+            const cid = Number(h.customer_id);
+            const role = String(h.role);
+
+            // ensure not already a holder (in DB)
+            const dupRes = await client.query(
+                'SELECT 1 FROM acc_holders WHERE account_no = $1 AND customer_id = $2',
+                [accountNo, cid]
+            );
+            if (dupRes.rowCount > 0) {
+                throw new Error(`Customer ${cid} is already a holder for account ${accountNo}`);
+            }
+
+            await client.query(
+                'INSERT INTO acc_holders (account_no, customer_id, role) VALUES ($1, $2, $3)',
+                [accountNo, cid, role]
+            );
+            insertedHolders.push({ customer_id: cid, role });
+        }
+
+        // commit
+        await client.query('COMMIT');
+        return { accountNo, insertedHolders };
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { }
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+
+
+export const createFixedDepositIfNone = async ({
+    account_no,
+    fd_plan_id,
+    amount
+}) => {
+    const client = await pool.connect();
+    try {
+        const numericAmount = Number(amount);
+        if (Number.isNaN(numericAmount) || numericAmount <= 0) {
+            throw new Error('Invalid amount');
+        }
+
+        await client.query('BEGIN');
+
+        // 1) ensure account exists
+        const accRes = await client.query(
+            'SELECT account_no FROM accounts WHERE account_no = $1',
+            [account_no]
+        );
+        if (accRes.rowCount === 0) {
+            throw new Error(`Account not found: ${account_no}`);
+        }
+
+        // 2) check for any active FD that uses this account
+        // Active = end_date IS NULL OR end_date > NOW()
+        const existingFd = await client.query(
+            `SELECT fd_account_no 
+       FROM fixed_deposit_account 
+       WHERE account_no = $1 AND (end_date IS NULL OR end_date > NOW())
+       LIMIT 1`,
+            [account_no]
+        );
+        if (existingFd.rowCount > 0) {
+            throw new Error(`An active fixed deposit already exists for account ${account_no}`);
+        }
+
+        // 3) load FD plan and months
+        const planRes = await client.query(
+            'SELECT fd_plan_id, months FROM fixed_deposit_plans WHERE fd_plan_id = $1',
+            [fd_plan_id]
+        );
+        if (planRes.rowCount === 0) {
+            throw new Error(`FD plan not found for id=${fd_plan_id}`);
+        }
+        const months = Number(planRes.rows[0].months);
+        if (Number.isNaN(months) || months <= 0) {
+            throw new Error('Invalid plan months value');
+        }
+
+        // 4) insert FD, compute end_date using SQL interval (DB time)
+        const insertQ = `
+      INSERT INTO fixed_deposit_account
+        (account_no, fd_plan_id, amount, start_date, end_date)
+      VALUES ($1, $2, $3, NOW(), NOW() + (INTERVAL '1 month' * $4))
+      RETURNING fd_account_no, account_no, fd_plan_id, amount, start_date, end_date
+    `;
+        const insertRes = await client.query(insertQ, [
+            account_no,
+            fd_plan_id,
+            numericAmount,
+            months
+        ]);
+
+        await client.query('COMMIT');
+        return insertRes.rows[0];
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { }
+        throw err;
+    } finally {
+        client.release();
+    }
 };

@@ -362,23 +362,82 @@ EXECUTE FUNCTION log_audit();
 
 
 --@block
-CREATE TRIGGER trg_audit_hand_transactions
-AFTER INSERT OR UPDATE OR DELETE ON acc_to_hand_transactions
-FOR EACH ROW
-EXECUTE FUNCTION log_audit();
+select * from customers;
+
 
 --@block
-CREATE TRIGGER trg_audit_acc_to_acc_transactions
-AFTER INSERT OR UPDATE OR DELETE ON acc_to_acc_transactions
-FOR EACH ROW
-EXECUTE FUNCTION log_audit();
---@block
-CREATE TRIGGER trg_audit_interest_payments
-AFTER INSERT OR UPDATE OR DELETE ON interest_payments
-FOR EACH ROW
-EXECUTE FUNCTION log_audit();
+CREATE TABLE accounts(
+	account_no SERIAL PRIMARY KEY,
+	created_date TIMESTAMP,
+	balance DECIMAL(10, 2) NOT NULL,
+	active_status BOOLEAN NOT NULL,
+	last_transaction_time TIMESTAMP,
+	last_transaction_id CHAR(10)
+);
 
 --@block
+CREATE TABLE savings_plans(
+	plan_id CHAR(5) PRIMARY KEY,
+	plan_name VARCHAR(25) NOT NULL,
+	min_age CHAR(2) NOT NULL,
+	max_age CHAR(2),
+	min_balance DECIMAL(5, 2) NOT NULL,
+	interest_rate DECIMAL(2, 2) NOT NULL
+);
 
-INSERT INTO login_authentication (user_id, username, role, password)
-VALUES (0, 'SYSTEM', 'system',''); 
+insert into savings_plans (plan_id, plan_name, min_age, max_age, min_balance,interest_rate) values
+('S0001', 'Adalt', '18', '60', '0','0.11');
+
+--@block
+CREATE TABLE savings_acccount(
+	account_no INT PRIMARY KEY REFERENCES accounts(account_no),
+	customer_id CHAR(7) NOT NULL REFERENCES customer(customer_id),
+	plan_id CHAR(5) REFERENCES savings_plans(plan_id)
+);
+
+--@block
+CREATE TABLE joint_plans(
+	plan_id CHAR(5) PRIMARY KEY,
+	plan_name VARCHAR(25),
+	min_age CHAR(2),
+	min_balance DECIMAL (5, 2) NOT NULL,
+	interest_rate DECIMAL (2, 2) NOT NULL
+);
+
+insert into joint_plans (plan_id, plan_name, min_age, min_balance,interest_rate) values
+('J0001', 'joint', '18', '0','0.11');
+
+--@block
+CREATE TABLE joint_account(
+	account_no CHAR(16) PRIMARY KEY REFERENCES accounts(account_no),
+	plan_id CHAR(5) REFERENCES joint_plans(plan_id)
+);
+
+
+--@block
+CREATE TYPE roles AS ENUM ('primary', 'joint', 'nominee');
+
+CREATE TABLE acc_holders (
+    account_no INT REFERENCES accounts(account_no) ON DELETE CASCADE,
+    customer_id INT REFERENCES customers(customer_id) ON DELETE CASCADE,
+    role roles NOT NULL,
+    PRIMARY KEY (account_no, customer_id)
+);
+
+CREATE TABLE fixed_deposit_plans(
+	fd_plan_id CHAR(2) PRIMARY KEY,
+	months CHAR(2) NOT NULL,
+	interest_rate DECIMAL(2, 2) NOT NULL
+);
+
+CREATE TABLE fixed_deposit_account(
+	fd_account_no SERIAL PRIMARY KEY,
+	account_no INT REFERENCES accounts(account_no),
+	fd_plan_id CHAR(2) NOT NULL REFERENCES fixed_deposit_plans(fd_plan_id),
+	amount DECIMAL (10, 2) NOT NULL,
+	start_date TIMESTAMP,
+	end_date TIMESTAMP
+);
+
+insert into fixed_deposit_plans (fd_plan_id, months, interest_rate) values
+('J0001','12','0.11');
