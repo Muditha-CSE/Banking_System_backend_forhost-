@@ -20,6 +20,6 @@ router.post(
 router.post(
     "/addfixeddeposit",
     authMiddleware.authenticateRole(["agent"]),
-    addJointAccount
+    addFixedDeposit
 );
 export default router;

@@ -7,7 +7,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import { errorHandler, notFound } from './src/middleware/errorHandler.js';
+// Removed errorHandler and notFound middleware
 
 // Load environment variables
 dotenv.config();
@@ -69,11 +69,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// 404 handler - must be after all routes
-app.use(notFound);
 
-// Global error handler - must be last
-app.use(errorHandler);
+// Removed global error and 404 handler middleware
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);

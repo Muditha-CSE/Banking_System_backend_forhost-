@@ -8,14 +8,17 @@ const { Pool } = pkg;
 
 // Create a pool of connections using environment variables
 const pool = new Pool({
-    user: process.env.DB_USER || 'muditha',
+    user: process.env.DB_USER || 'irjrurtha',
     host: process.env.DB_HOST || 'localhost',
-    database: process.env.DB_DATABASE || 'banking_db',
-    password: process.env.DB_PASSWORD || 'Muditha21250@pcc',
+    database: process.env.DB_DATABASE || 'erheyeryh',
+    password: process.env.DB_PASSWORD || 'eheheheheh@pcc',
     port: parseInt(process.env.DB_PORT) || 5432,
     max: parseInt(process.env.DB_MAX_CONNECTIONS) || 20,
     idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000,
-    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 2000
+    connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 2000,
+    ssl: {
+        rejectUnauthorized: false 
+    }
 });
 
 // Test the connection

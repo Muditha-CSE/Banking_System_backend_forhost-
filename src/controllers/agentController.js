@@ -1,9 +1,41 @@
-import {addNewCustomer,getAgentBranch,searchCustomer,createSavingsAccount,getMinBalance,
-    fdChecker,createFixedDepositeAccount,accountChecker,makeDepositeAccount
-    ,makeWithdrawAccount,getAccinfo,insertFailedWIthdrawal,accToAccTrans,checkRoleAccount
-            ,getMinAge, listCustomers, getCustomerByNIC, updateCustomerByNIC, bulkCreateCustomers, deleteCustomerByNIC, reactivateCustomerByNIC, deleteSavingsAccountByNIC, reactivateSavingsAccountByNIC, deleteFixedDepositByNIC, reactivateFixedDepositByNIC, getSavingsAccountsByNIC, getFixedDepositsByNIC, getAllSavingsAccounts, getAllFixedDeposits, getJointAccountByAccountAndNic} from '../models/agentModel.js';
-import { findPlanByAge } from '../models/savingsPlansModel.js';
-
+import {
+    addNewCustomer,
+    getAgentBranch,
+    searchCustomer,
+    getMinAge,
+    searchCustomerByNIC,
+    getMinBalance,
+    createSavingsAccount,
+    accountChecker,
+    getAccinfo,
+    fdChecker,
+    checkRoleAccount,
+    createFixedDepositeAccount,
+    makeDepositeAccount,
+    makeWithdrawAccount,
+    insertFailedWIthdrawal,
+    accToAccTrans,
+    listCustomers,
+    getCustomerByNIC,
+    updateCustomerByNIC,
+    bulkCreateCustomers,
+    deleteCustomerByNIC,
+    reactivateCustomerByNIC,
+    deleteSavingsAccountByNIC,
+    deleteSavingsAccountByAccountNo,
+    reactivateSavingsAccountByNIC,
+    deleteFixedDepositByNIC,
+    reactivateFixedDepositByNIC,
+    getSavingsAccountsByNIC,
+    getFixedDepositsByNIC,
+    getAllSavingsAccounts,
+    getAllFixedDeposits,
+    getJointAccountByAccountAndNic,
+    getAccountHolders,
+    deleteJointAccountByPrimary,
+    findPlanByAge,
+    getAllSavingsPlans
+} from '../models/agentModel.js';
 import {logSystemActivity} from '../models/systemModel.js';
 import bcrypt from 'bcrypt';
 import pool from '../../database.js';
@@ -79,14 +111,6 @@ const addSavingsAccount = async (req,res)=>{
         nic: (u.nic || '').trim().toUpperCase()
     }));
     let normalizedCreatedCustomer = (created_customer || '').trim().toUpperCase();
-    // Basic diagnostics
-    console.log('addSavingsAccount payload:', {
-        created_customer,
-        normalizedCreatedCustomer,
-        users: normalizedUsers,
-        initial_deposit,
-        plan_id
-    });
     const NICs = normalizedUsers.map(user => user.nic);
     const client = await pool.connect();
 
@@ -137,7 +161,6 @@ const addSavingsAccount = async (req,res)=>{
     const checkCustomer = await searchCustomer(client,NICs);
     // Check created_customer exists
     const checkCreated = await searchCustomer(client,[normalizedCreatedCustomer]);
-    console.log('Customer existence check:', { holders: checkCustomer, created: checkCreated });
         
         // Check if any holders are deactivated
         if (!checkCustomer.ok) {
@@ -250,7 +273,11 @@ const addSavingsAccount = async (req,res)=>{
         } catch (err) {
             await client.query('ROLLBACK');
             console.error('addSavingsAccount error:', err);
-            return res.status(500).json({ error: err.message });
+            // Return detailed error message (including age validation failures)
+            return res.status(400).json({ 
+                message: err.message || 'Failed to create savings account',
+                error: err.message 
+            });
         } finally {
             client.release();
         }
@@ -262,17 +289,12 @@ const addFixedDepositeAccount = async (req,res)=>{
     const {account_no,fd_plan_id,amount,NIC} = req.body;
     const agent_id = req.user.userId;
     
-    // DEBUG: Log the entire request body to see what frontend is sending
-    console.log('FD Request body:', JSON.stringify(req.body, null, 2));
-    console.log('FD Extracted values:', { account_no, fd_plan_id, amount, NIC });
-
     const client = await pool.connect();
 
     try{
         await client.query('BEGIN');
         const nicRaw = (NIC || '').trim();
         const nicUpper = nicRaw.toUpperCase();
-        console.log('FD NIC validation - raw:', nicRaw, 'length:', nicRaw.length, 'upper:', nicUpper);
         // Validate NIC (12 digits or 9 digits + V/v, case-insensitive)
         if (!/^(?:\d{12}|\d{9}V)$/i.test(nicUpper)) {
             await client.query('ROLLBACK');
@@ -303,44 +325,50 @@ const addFixedDepositeAccount = async (req,res)=>{
             }
         }
 
-        // Check if NIC is associated with the account and get holder details
-        const accountCheck = await accountChecker(client,account_no,nicUpper);
-        if(!accountCheck){
+        // Ensure linked savings account exists and is active
+        const savingsAccInfo = await getAccinfo(client, account_no);
+        if (!savingsAccInfo) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: "Linked savings account not found" });
+        }
+        if (savingsAccInfo.active_status === false) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: "Linked savings account is deactivated. Cannot create fixed deposit." });
+        }
+
+        // Check if FD already exists for this account
+        const fdCheck = await fdChecker(client,account_no);
+        if(fdCheck > 0){
+            await client.query('ROLLBACK');
+            return res.status(400).json({message: "Fixed deposit account already exists for the given savings account"});
+        }
+
+        // Check if NIC is associated with the account using accountholders table
+        const holderCheck = await client.query(
+            `SELECT role FROM accountholders 
+             WHERE account_no = $1 AND UPPER(TRIM(customer_nic)) = $2`,
+            [account_no, nicUpper]
+        );
+
+        // If NIC is not in accountholders table at all
+        if (holderCheck.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({message: "This NIC is not associated with the specified account number"});
         }
 
-        // Check if it's a joint account (more than one holder)
+        const holderRole = holderCheck.rows[0].role;
+
+        // Check if this is a joint account (multiple holders)
         const holderCountQuery = await client.query(
-            'SELECT COUNT(*) as holder_count FROM accountHolders WHERE account_no = $1',
+            'SELECT COUNT(*) as holder_count FROM accountholders WHERE account_no = $1',
             [account_no]
         );
         const holderCount = parseInt(holderCountQuery.rows[0].holder_count);
 
-        // For joint accounts, only primary holder can create FD
-        if (holderCount > 1 && accountCheck.role !== 'primary') {
+        // If it's a joint account, only primary holder can create FD
+        if (holderCount > 1 && holderRole !== 'primary') {
             await client.query('ROLLBACK');
-            return res.status(400).json({
-                message: "Only the primary account holder can create a fixed deposit for a joint account"
-            });
-        }
-        // Ensure linked savings account is active
-        const savingsAccInfo = await getAccinfo(client, account_no);
-        if (!savingsAccInfo) {
-            return res.status(400).json({ message: "Linked savings account not found" });
-        }
-        if (savingsAccInfo.active_status === false) {
-            return res.status(400).json({ message: "Linked savings account is deactivated. Cannot create fixed deposit." });
-        }
-        const fdCheck = await fdChecker(client,account_no);
-
-        if(fdCheck > 0){
-            return res.status(400).json({message: "Fixed deposit account already exists for the given savings account"});
-        }
-
-        const checkRole = await checkRoleAccount(client,account_no,nicUpper);
-        if(checkRole !== 'primary'){
-            return res.status(400).json({message: "Only primary account holder can create a fixed deposit account"});
+            return res.status(400).json({message: "Only the primary account holder can create fixed deposit accounts for joint savings accounts"});
         }
         
         await createFixedDepositeAccount(client,account_no,fd_plan_id,amount,agent_id);
@@ -351,8 +379,9 @@ const addFixedDepositeAccount = async (req,res)=>{
     }catch(err){
         await client.query('ROLLBACK');
         console.error('FD Creation Error:', err);
-        return res.status(500).json({
-            message: err.message || 'Failed to create fixed deposit',
+        // Return detailed error message (including age validation failures)
+        return res.status(400).json({
+            message: err.message || 'Failed to create fixed deposit account',
             error: err.message
         });
     }finally{
@@ -467,7 +496,7 @@ const makeWithdraw = async (req,res)=>{
     }
 };
 
-const accToAccTransfer = async (req,res)=>{
+ const accToAccTransfer = async (req,res)=>{
     const {sender_account_no,receiver_account_no,amount,sender_NIC} = req.body;
     const agent_id = req.user.userId;
 
@@ -511,10 +540,17 @@ const accToAccTransfer = async (req,res)=>{
             await client.query('ROLLBACK');
             return res.status(400).json({message: "Insufficient balance in sender account"});
         }
-        await accToAccTrans(client,sender_account_no,receiver_account_no,amount,agent_id,senderAccount.customer_nic);
+        const transferResult = await accToAccTrans(client, sender_account_no, receiver_account_no, amount, agent_id, senderAccount.customer_nic);
+        if (transferResult.status !== 'SUCCESS') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: transferResult.message });
+        }
         await logSystemActivity(client, 'ACC_TO_ACC_TRANSFER', `Amount ${amount} transferred from account ${sender_account_no} to account ${receiver_account_no} by agent ID ${agent_id}`, agent_id);
         await client.query('COMMIT');
-        return res.status(200).json({message: "Account to account transfer successful"});
+        return res.status(200).json({
+            message: "Account to account transfer successful",
+            transaction_id: transferResult.transaction_id
+        });
     }catch(err){
         await client.query('ROLLBACK');
         console.error(err);
@@ -606,9 +642,6 @@ const bulkCreateCustomersController = async (req, res) => {
     const agentId = req.user.userId;
     const { customers } = req.body; // array of { username, name, email, phone, nic, gender, address, DOB, password }
 
-    console.log('Received bulk customer data:', JSON.stringify(customers, null, 2));
-    console.log('Number of customers:', customers?.length);
-    
     if (!Array.isArray(customers) || customers.length === 0) {
         return res.status(400).json({ message: 'No customers provided' });
     }
@@ -621,18 +654,6 @@ const bulkCreateCustomersController = async (req, res) => {
         // Validate and hash passwords
         const validated = [];
         for (const c of customers) {
-            // Log the customer data for debugging
-            console.log(`Validating customer ${c.username}:`, {
-                username: c.username,
-                name: c.name,
-                email: c.email,
-                phone: c.phone,
-                nic: c.nic,
-                gender: c.gender,
-                address: c.address,
-                DOB: c.DOB,
-                hasPassword: !!c.password
-            });
             
             if (!c.username || !c.name || !c.email || !c.phone || !c.nic || !c.gender || !c.address || !c.DOB || !c.password) {
                 throw new Error(`Missing required fields for customer: ${JSON.stringify(c)}`);
@@ -656,14 +677,14 @@ const bulkCreateCustomersController = async (req, res) => {
             const hashedPassword = await bcrypt.hash(c.password, 10);
             validated.push({
                 username: c.username,
-                password: hashedPassword,
+                hashedPassword: hashedPassword,
                 name: c.name,
                 email: c.email,
                 phone: c.phone,
                 nic: c.nic.trim().toUpperCase(),
                 gender: normalizedGender,  // Use normalized gender
                 address: c.address,
-                DOB: c.DOB,
+                dob: c.DOB,  // Use lowercase 'dob' to match the model
             });
         }
 
@@ -730,10 +751,10 @@ const reactivateCustomerController = async (req, res) => {
     }
 };
 
-// Delete Savings Account
+// Delete Savings Account (requires NIC verification)
 const deleteSavingsAccountController = async (req, res) => {
     const { account_no } = req.params;
-    const { customer_nic } = req.body;
+    const { customer_nic, isCustomerRequest } = req.body; // Accept isCustomerRequest flag
     const agentId = req.user.userId;
     const client = await pool.connect();
 
@@ -742,10 +763,115 @@ const deleteSavingsAccountController = async (req, res) => {
             return res.status(400).json({ error: 'Customer NIC is required' });
         }
 
-        const result = await deleteSavingsAccountByNIC(client, account_no, customer_nic, agentId);
-        await logSystemActivity(client, 'DEACTIVATE_SAVINGS_ACCOUNT', `Agent ${agentId} deactivated savings account ${account_no} by customer NIC ${customer_nic}`, agentId);
-        return res.status(200).json({ message: result.message });
+        // Pass the isCustomerRequest flag (defaults to false if not provided)
+        const result = await deleteSavingsAccountByNIC(
+            client, 
+            account_no, 
+            customer_nic, 
+            agentId, 
+            isCustomerRequest === true || isCustomerRequest === 'true'
+        );
+        
+        const requestType = isCustomerRequest ? 'on customer request' : 'by agent';
+        await logSystemActivity(
+            client, 
+            'DEACTIVATE_SAVINGS_ACCOUNT', 
+            `Agent ${agentId} deactivated savings account ${account_no} ${requestType} (NIC: ${customer_nic})`, 
+            agentId
+        );
+        
+        return res.status(200).json({ message: 'Savings account deactivated successfully' });
     } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+};
+
+// Delete Savings Account by Account Number Only (simpler version)
+const deleteSavingsAccountByAccountNoController = async (req, res) => {
+    const { accountNo } = req.params;
+    const { customer_nic, isCustomerRequest } = req.body; // Accept customer_nic and isCustomerRequest flag
+    const agentId = req.user.userId;
+    const client = await pool.connect();
+
+    try {
+        let result;
+        
+        // If customer_nic is provided, check if this is a joint account
+        if (customer_nic) {
+            // Normalize NIC
+            const normalizedNic = (customer_nic || '').trim().toUpperCase();
+            
+            // Check if this account has multiple holders (joint account)
+            const holderCheck = await client.query(
+                `SELECT COUNT(*) as holder_count 
+                 FROM accountholders 
+                 WHERE account_no = $1`,
+                [accountNo]
+            );
+            
+            const holderCount = parseInt(holderCheck.rows[0]?.holder_count || 0);
+            
+            if (holderCount > 1) {
+                // This is a joint account, use the primary holder validation
+                result = await deleteJointAccountByPrimary(
+                    client,
+                    accountNo,
+                    normalizedNic,
+                    agentId,
+                    isCustomerRequest === true || isCustomerRequest === 'true'
+                );
+            } else {
+                // Regular account with single holder
+                result = await deleteSavingsAccountByNIC(
+                    client,
+                    accountNo,
+                    normalizedNic,
+                    agentId,
+                    isCustomerRequest === true || isCustomerRequest === 'true'
+                );
+                
+                if (!result) {
+                    return res.status(403).json({ 
+                        error: 'You are not an account holder of this account' 
+                    });
+                }
+            }
+        } else {
+            // No customer_nic provided, use the simpler version (agent override)
+            result = await deleteSavingsAccountByAccountNo(
+                client, 
+                accountNo, 
+                agentId, 
+                isCustomerRequest === true || isCustomerRequest === 'true'
+            );
+        }
+        
+        const requestType = isCustomerRequest ? 'on customer request' : 'by agent';
+        await logSystemActivity(
+            client, 
+            'DEACTIVATE_SAVINGS_ACCOUNT', 
+            `Agent ${agentId} deactivated savings account ${accountNo} ${requestType}${customer_nic ? ` (NIC: ${customer_nic})` : ''}`, 
+            agentId
+        );
+        
+        return res.status(200).json({ 
+            message: 'Savings account deactivated successfully',
+            account: result 
+        });
+    } catch (err) {
+        if (err.message === 'Savings account not found') {
+            return res.status(404).json({ error: 'Savings account not found' });
+        }
+        
+        // Handle specific error messages from joint account validation
+        if (err.message.includes('not an account holder') || 
+            err.message.includes('Only the primary')) {
+            return res.status(403).json({ error: err.message });
+        }
+        
         console.error(err);
         return res.status(500).json({ error: err.message });
     } finally {
@@ -755,19 +881,66 @@ const deleteSavingsAccountController = async (req, res) => {
 
 // Reactivate Savings Account
 const reactivateSavingsAccountController = async (req, res) => {
-    const { account_no } = req.params;
-    const { customer_nic } = req.body;
+    // Route can be either:
+    // /savingsaccounts/:accountNo/reactivate (NIC in body)
+    // /savingsaccount/:nic/:accountNo/reactivate (NIC in URL)
+    const { accountNo: accountNoParam, nic: nicParam } = req.params;
+    const rawCustomerNic = (req.body && req.body.customer_nic) ? req.body.customer_nic : nicParam;
+    const accountNo = (accountNoParam || '').toString().trim();
+    const customer_nic = (rawCustomerNic || '').toString().trim();
     const agentId = req.user.userId;
     const client = await pool.connect();
 
     try {
-        if (!customer_nic) {
-            return res.status(400).json({ error: 'Customer NIC is required' });
+        if (!accountNo) {
+            return res.status(400).json({ error: 'Account number is required' });
         }
 
-        const result = await reactivateSavingsAccountByNIC(client, account_no, customer_nic, agentId);
-        await logSystemActivity(client, 'REACTIVATE_SAVINGS_ACCOUNT', `Agent ${agentId} reactivated savings account ${account_no} by customer NIC ${customer_nic}`, agentId);
-        return res.status(200).json({ message: result.message });
+        // If NIC not provided, get the primary holder for single accounts
+        let finalNic = customer_nic;
+        if (!finalNic) {
+            // Get account holders
+            const holders = await client.query(
+                'SELECT customer_nic, role FROM accountholders WHERE account_no = $1',
+                [accountNo]
+            );
+            
+            if (holders.rows.length === 0) {
+                return res.status(404).json({ error: 'Account not found' });
+            }
+            
+            if (holders.rows.length === 1) {
+                // Single account, use the only holder's NIC
+                finalNic = holders.rows[0].customer_nic;
+            } else {
+                // Joint account, require NIC
+                return res.status(400).json({ error: 'Customer NIC is required for joint accounts' });
+            }
+        }
+
+        // Validate NIC is an account holder for this account
+        const holderRole = await checkRoleAccount(client, accountNo, finalNic);
+        if (!holderRole) {
+            return res.status(403).json({ error: 'Customer NIC is not an account holder for this account' });
+        }
+
+        const result = await reactivateSavingsAccountByNIC(client, accountNo, finalNic, agentId);
+        if (!result) {
+            // Double-check account existence and status for better diagnostics
+            const acc = await getAccinfo(client, accountNo);
+            if (!acc) {
+                return res.status(404).json({ error: 'Savings account not found' });
+            }
+            if (acc.active_status === true) {
+                await logSystemActivity(client, 'REACTIVATE_SAVINGS_ACCOUNT', `Agent ${agentId} requested reactivation for already-active savings account ${accountNo} (NIC ${finalNic})`, agentId);
+                return res.status(200).json({ message: 'Savings account is already active' });
+            }
+            // If we reach here, something prevented the update even though NIC is a holder and account exists
+            return res.status(500).json({ error: 'Failed to reactivate account due to an unexpected condition' });
+        }
+
+        await logSystemActivity(client, 'REACTIVATE_SAVINGS_ACCOUNT', `Agent ${agentId} reactivated savings account ${accountNo} by customer NIC ${finalNic}`, agentId);
+        return res.status(200).json({ message: 'Savings account reactivated successfully' });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ error: err.message });
@@ -862,22 +1035,48 @@ const getAllFixedDepositsController = async (req, res) => {
     }
 };
 
+// Get a single savings account by account number
+const getSavingsAccountController = async (req, res) => {
+    const { accountNo } = req.params;
+    const client = await pool.connect();
+    
+    try {
+        if (!accountNo) {
+            return res.status(400).json({ error: 'Account number is required' });
+        }
+        
+        const account = await getAccinfo(client, accountNo);
+        
+        if (!account) {
+            return res.status(404).json({ message: 'Savings account not found' });
+        }
+        
+        return res.status(200).json({ account });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+};
+
 // Get joint account by account number and NIC
 const getJointAccountController = async (req, res) => {
     const { account_no, nic } = req.query;
     const client = await pool.connect();
-    
+
     try {
-        if (!account_no || !nic) {
-            return res.status(400).json({ error: 'Both account number and NIC are required' });
+        // Validate account_no is a valid integer
+        if (!account_no || !nic || isNaN(parseInt(account_no))) {
+            return res.status(400).json({ error: 'Both account number and NIC are required, and account number must be a valid integer.' });
         }
-        
-        const result = await getJointAccountByAccountAndNic(client, account_no, nic);
-        
+
+        const result = await getJointAccountByAccountAndNic(client, parseInt(account_no), nic);
+
         if (!result.ok) {
             return res.status(404).json({ message: result.message });
         }
-        
+
         return res.status(200).json({ account: result.account });
     } catch (err) {
         console.error(err);
@@ -887,5 +1086,93 @@ const getJointAccountController = async (req, res) => {
     }
 };
 
-export { addCustomer, addSavingsAccount, addFixedDepositeAccount, fdChecker, makeDeposit, makeWithdraw, accToAccTransfer, listCustomersController, getCustomerController, updateCustomerController, bulkCreateCustomersController, deleteCustomerController, reactivateCustomerController, deleteSavingsAccountController, reactivateSavingsAccountController, deleteFixedDepositController, reactivateFixedDepositController, getCustomerAccountsController, getAllSavingsAccountsController, getAllFixedDepositsController, getJointAccountController };
+// Get all account holders for a joint account
+const getAccountHoldersController = async (req, res) => {
+    const { accountNo } = req.params;
+    const client = await pool.connect();
+    
+    try {
+        // Validate account number
+        if (!accountNo || isNaN(parseInt(accountNo))) {
+            return res.status(400).json({ error: 'Valid account number is required' });
+        }
+        
+        const holders = await getAccountHolders(client, parseInt(accountNo));
+        
+        if (holders.length === 0) {
+            return res.status(404).json({ message: 'No account holders found for this account' });
+        }
+        
+        return res.status(200).json({ 
+            account_no: accountNo,
+            holder_count: holders.length,
+            holders 
+        });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+};
+
+// Delete joint account - Only PRIMARY user can deactivate
+const deleteJointAccountController = async (req, res) => {
+    const { accountNo } = req.params;
+    const { customer_nic, isCustomerRequest } = req.body;
+    const agentId = req.user.userId;
+    const client = await pool.connect();
+    
+    try {
+        if (!customer_nic) {
+            return res.status(400).json({ error: 'Customer NIC is required' });
+        }
+        
+        const result = await deleteJointAccountByPrimary(
+            client, 
+            accountNo, 
+            customer_nic, 
+            agentId, 
+            isCustomerRequest === true || isCustomerRequest === 'true'
+        );
+        
+        const requestType = isCustomerRequest ? 'on customer request' : 'by agent';
+        await logSystemActivity(
+            client, 
+            'DEACTIVATE_JOINT_ACCOUNT', 
+            `Agent ${agentId} deactivated joint account ${accountNo} ${requestType} (Primary holder NIC: ${customer_nic})`, 
+            agentId
+        );
+        
+        return res.status(200).json({ 
+            message: 'Joint account deactivated successfully. Only the primary account holder can deactivate joint accounts.',
+            account: result 
+        });
+    } catch (err) {
+        console.error(err);
+        
+        // Handle specific error messages
+        if (err.message.includes('not an account holder') || 
+            err.message.includes('Only the primary') ||
+            err.message.includes('not found')) {
+            return res.status(403).json({ error: err.message });
+        }
+        
+        return res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+};
+
+// Get all savings plans
+const getAllSavingsPlansController = async (req, res) => {
+    try {
+        const plans = await getAllSavingsPlans(pool);
+        res.status(200).json({ plans });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+export { addCustomer, addSavingsAccount, addFixedDepositeAccount, fdChecker, makeDeposit, makeWithdraw, accToAccTransfer, listCustomersController, getCustomerController, updateCustomerController, bulkCreateCustomersController, deleteCustomerController, reactivateCustomerController, deleteSavingsAccountController, deleteSavingsAccountByAccountNoController, reactivateSavingsAccountController, deleteFixedDepositController, reactivateFixedDepositController, getCustomerAccountsController, getAllSavingsAccountsController, getAllFixedDepositsController, getSavingsAccountController, getJointAccountController, getAccountHoldersController, deleteJointAccountController, getAllSavingsPlansController };
 

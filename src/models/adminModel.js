@@ -1,3 +1,5 @@
+
+
 export const addNewAdminToLog = async (client,username,password,name,email,phone,NIC,created_by)=>{
 
     await client.query(`SET LOCAL app.current_user_id = '${created_by}'`);
@@ -194,7 +196,7 @@ export const transactionsByAgents = async (pool)=>{
                 SUM(t.amount) AS total_amount,
                 COUNT(*) AS tx_count
             FROM acc_to_acc_transactions t
-            LEFT JOIN savingsAccounts sa ON sa.account_no = t.sender_account_no
+            LEFT JOIN savingsaccounts sa ON sa.account_no = t.sender_account_no
             /* Count only completed transfers if status is used; remove this line if not applicable */
             /* WHERE t.status = 'completed' */
             GROUP BY COALESCE(t.transaction_done_by, sa.created_by)
@@ -224,7 +226,7 @@ export const accontWiseTransactions = async (client)=>{
 
         COALESCE(d.t_count,0)+COALESCE(w.t_count,0)+COALESCE(r.t_count,0)+COALESCE(s.t_count,0) AS total_transaction_count
 
-        from savingsAccounts a
+        from savingsaccounts a
         left join (
             select account_no, sum(amount) AS amount, count(amount) AS t_count
             from acc_to_hand_transactions
@@ -261,20 +263,21 @@ export const getFDInfo = async (client)=>{
             f.fd_account_no,
             (f.deposit_amount)::float AS amount,
             f.start_date,
-            f.start_date + INTERVAL '1 year' AS end_date,
+            f.end_date,
             p.interest_rate,
             f.status,
+            f.is_active,
             f.last_interest_date + INTERVAL '30 days' AS next_interest_date,
             ah.customer_nic,
             c.name AS customer_name,
             la.username AS agent_username
-        FROM fixedDepositAccounts f
-        LEFT JOIN savingsAccounts sa ON sa.account_no = f.linked_account_no
-        LEFT JOIN accountHolders ah ON ah.account_no = sa.account_no AND ah.role = 'primary'
+        FROM fixeddepositaccounts f
+        LEFT JOIN savingsaccounts sa ON sa.account_no = f.linked_account_no
+        LEFT JOIN accountholders ah ON ah.account_no = sa.account_no AND ah.role = 'primary'
         LEFT JOIN customers c ON c.nic = ah.customer_nic
         LEFT JOIN login_authentication la ON la.user_id = f.created_by
-        LEFT JOIN fixedDepositsPlans p ON p.fd_plan_id = f.fd_plan_id
-        WHERE f.status = 'active'`
+        LEFT JOIN fixeddepositsplans p ON p.fd_plan_id = f.fd_plan_id
+        WHERE f.status = 'active' AND f.is_active = TRUE`
     );
     return rows;
 };
@@ -286,8 +289,8 @@ export const getMonthlyInterestDistribution = async (pool)=>{
             p.plan_name,
             COALESCE(sum(t.amount), 0) AS total_interest_distributed,
             COUNT(t.transaction_id) AS interest_payment_count
-        FROM savingsPlans p
-        LEFT JOIN savingsAccounts s ON s.plan_id = p.plan_id
+        FROM savingsplans p
+        LEFT JOIN savingsaccounts s ON s.plan_id = p.plan_id
         LEFT JOIN interest_payments t ON t.savings_account_no = s.account_no 
             AND t.interest_type = 'savings'
             AND t.status = 'completed' 
@@ -302,7 +305,7 @@ export const customerId = async (client,NIC)=>{
     const {rows} = await client.query(
         `select customer_id from customers where nic = $1`,[NIC]
     );
-    return rows[0].customer_id;
+    return rows.length > 0 ? rows[0].customer_id : null;
 };
 
 export const GetCustomerActivity = async (pool,nic)=>{
@@ -317,8 +320,8 @@ export const GetCustomerActivity = async (pool,nic)=>{
     COALESCE(r.total_accToacc_received, 0) AS total_accToacc_received
     FROM accountholders a
     JOIN customers c ON c.nic = a.customer_nic
-    JOIN savingsAccounts sa ON sa.account_no = a.account_no
-    JOIN savingsPlans sp ON sp.plan_id = sa.plan_id
+    JOIN savingsaccounts sa ON sa.account_no = a.account_no
+    JOIN savingsplans sp ON sp.plan_id = sa.plan_id
     LEFT JOIN (
         SELECT account_no, SUM(amount) AS total_deposits
         FROM acc_to_hand_transactions 
@@ -374,8 +377,8 @@ export const GetCustomerActivityByAcc = async (pool,nic,acc_no)=>{
     COALESCE(r.total_accToacc_received, 0) AS total_accToacc_received
     FROM accountholders a
     JOIN customers c ON c.nic = a.customer_nic
-    JOIN savingsAccounts sa ON sa.account_no = a.account_no
-    JOIN savingsPlans sp ON sp.plan_id = sa.plan_id
+    JOIN savingsaccounts sa ON sa.account_no = a.account_no
+    JOIN savingsplans sp ON sp.plan_id = sa.plan_id
     LEFT JOIN (
         SELECT account_no, SUM(amount) AS total_deposits
         FROM acc_to_hand_transactions 
@@ -407,7 +410,7 @@ export const GetCustomerActivityByAcc = async (pool,nic,acc_no)=>{
 
 export const getsystemLogs = async (pool)=>{
     const {rows} = await pool.query(
-        `select * from systemLogs order by performed_at DESC`
+        `select * from systemlogs order by performed_at DESC`
     );
     return rows;
 }
