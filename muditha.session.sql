@@ -474,7 +474,7 @@ BEGIN
     BEGIN
         user_id_value := current_setting('app.current_user_id', true)::INT;
         IF user_id_value IS NULL THEN
-            user_id_value := 0;
+            user_id_value := 1;
         END IF;
     EXCEPTION
         WHEN OTHERS THEN
