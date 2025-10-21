@@ -72,7 +72,7 @@ VALUES (
     '0112345678',
     '08:30:00',
     '17:00:00',
-    1  
+    1  -- assuming user_id = 1 exists in login_authentication
 );
 
 
@@ -113,8 +113,7 @@ insert into fixeddepositsplans (plan_name, plan_duration_months, interest_rate, 
 ('1 year fixed deposit',12,14,18,59),
 ('3 year fixed deposit',36,15,18,59);
 --@block
-
-
+-- Procedure: can_open_savings_account
 CREATE OR REPLACE FUNCTION can_open_savings_account(p_customer_nic VARCHAR, p_plan_id INT)
 RETURNS TABLE(is_eligible BOOLEAN, message TEXT) AS $$
 DECLARE
@@ -154,7 +153,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 --@block
-
+-- Procedure: can_open_fd_account
 CREATE OR REPLACE FUNCTION can_open_fd_account(p_customer_nic VARCHAR, p_fd_plan_id INT)
 RETURNS TABLE(is_eligible BOOLEAN, message TEXT) AS $$
 DECLARE
@@ -194,6 +193,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 --@block
+-- Procedure: create_savings_account_with_age_check
 CREATE OR REPLACE FUNCTION create_savings_account_with_age_check(
     p_customer_nic VARCHAR,
     p_plan_id INT,
@@ -207,6 +207,7 @@ DECLARE
     v_msg TEXT;
     v_account_no INT;
 BEGIN
+    -- Check age eligibility
     SELECT eligibility.is_eligible, eligibility.message 
     INTO v_eligible, v_msg 
     FROM can_open_savings_account(p_customer_nic, p_plan_id) AS eligibility;
@@ -216,10 +217,12 @@ BEGIN
         RETURN;
     END IF;
     
+    -- Create the account
     INSERT INTO savingsAccounts (balance, plan_id, created_by, branch_id, created_customer_nic)
     VALUES (p_initial_balance, p_plan_id, p_created_by, p_branch_id, p_customer_nic)
     RETURNING savingsAccounts.account_no INTO v_account_no;
     
+    -- Insert into accountHolders
     INSERT INTO accountHolders (role, account_no, customer_nic)
     VALUES ('primary', v_account_no, p_customer_nic);
     
@@ -228,6 +231,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 --@block
+-- Procedure: create_fd_account_with_age_check
 CREATE OR REPLACE FUNCTION create_fd_account_with_age_check(
     p_customer_nic VARCHAR,
     p_fd_plan_id INT,
@@ -243,6 +247,7 @@ DECLARE
     v_end_date TIMESTAMP;
     v_duration INT;
 BEGIN
+    -- Check age eligibility
     SELECT eligibility.is_eligible, eligibility.message 
     INTO v_eligible, v_msg 
     FROM can_open_fd_account(p_customer_nic, p_fd_plan_id) AS eligibility;
@@ -252,12 +257,14 @@ BEGIN
         RETURN;
     END IF;
     
+    -- Get plan duration and calculate end date
     SELECT plan_duration_months INTO v_duration 
     FROM fixedDepositsPlans 
     WHERE fd_plan_id = p_fd_plan_id;
     
     v_end_date := NOW() + (v_duration || ' months')::INTERVAL;
     
+    -- Create the FD account
     INSERT INTO fixedDepositAccounts (start_date, end_date, deposit_amount, linked_account_no, fd_plan_id, created_by)
     VALUES (NOW(), v_end_date, p_deposit_amount, p_linked_account_no, p_fd_plan_id, p_created_by)
     RETURNING fixedDepositAccounts.fd_account_no INTO v_fd_account_no;
@@ -463,6 +470,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     user_id_value INT;
 BEGIN
+    -- Try to get the current user ID from session variable, default to 0 (SYSTEM) if not set
     BEGIN
         user_id_value := current_setting('app.current_user_id', true)::INT;
         IF user_id_value IS NULL THEN
@@ -470,7 +478,7 @@ BEGIN
         END IF;
     EXCEPTION
         WHEN OTHERS THEN
-            user_id_value := 2;  
+            user_id_value := 2;  -- Default to SYSTEM user
     END;
 
     IF TG_OP = 'INSERT' THEN
@@ -532,6 +540,14 @@ EXECUTE FUNCTION log_audit();
 
 
 --@block
+select * from customers;
+
+
+
+select * from branches
+
+--@block
+-- Stored Procedure: Atomic Account-to-Account Transfer
 CREATE OR REPLACE FUNCTION transfer_between_accounts(
     p_sender_account_no INT,
     p_receiver_account_no INT,
@@ -548,6 +564,7 @@ DECLARE
     v_sender_balance NUMERIC(15,2);
     v_receiver_exists BOOLEAN;
 BEGIN
+    -- Validation: Check sender balance
     SELECT balance INTO v_sender_balance 
     FROM savingsaccounts 
     WHERE account_no = p_sender_account_no;
@@ -561,6 +578,7 @@ BEGIN
         RETURN;
     END IF;
     
+    -- Validation: Check receiver exists
     SELECT EXISTS(SELECT 1 FROM savingsaccounts WHERE account_no = p_receiver_account_no) 
     INTO v_receiver_exists;
     IF NOT v_receiver_exists THEN
@@ -568,14 +586,17 @@ BEGIN
         RETURN;
     END IF;
     
+    -- Deduct from sender
     UPDATE savingsaccounts 
     SET balance = balance - p_amount, updated_at = NOW() 
     WHERE account_no = p_sender_account_no;
     
+    -- Add to receiver
     UPDATE savingsaccounts 
     SET balance = balance + p_amount, updated_at = NOW() 
     WHERE account_no = p_receiver_account_no;
     
+    -- Record transfer in acc_to_acc_transactions
     INSERT INTO acc_to_acc_transactions (
         amount, sender_account_no, receiver_account_no, 
         transaction_done_by, status, transaction_date, transaction_requested_by
@@ -583,15 +604,24 @@ BEGIN
     VALUES (p_amount, p_sender_account_no, p_receiver_account_no, p_agent_id, 'completed', NOW(), p_sender_nic)
     RETURNING acc_to_acc_transactions.transaction_id INTO v_transaction_id;
     
+    -- Return success
     RETURN QUERY SELECT v_transaction_id, 'SUCCESS'::VARCHAR, 'Transfer completed'::VARCHAR;
     
 EXCEPTION
     WHEN OTHERS THEN
+        -- Automatic rollback by PostgreSQL
         RETURN QUERY SELECT NULL::INT, 'FAILED'::VARCHAR, SQLERRM::VARCHAR;
 END;
 $$ LANGUAGE plpgsql;
 
+--@block
+-- ============================================
+-- Monthly Interest Calculation Procedures
+-- Banking System - Stored Procedures
+-- Created: October 20, 2025
+-- ============================================
 
+-- 1. SAVINGS ACCOUNT MONTHLY INTEREST
 --@block
 CREATE OR REPLACE FUNCTION calculate_monthly_interest()
 RETURNS TABLE (
@@ -669,6 +699,7 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
+-- 2. FIXED DEPOSIT MONTHLY INTEREST
 
 CREATE OR REPLACE FUNCTION calculate_fd_interest()
 RETURNS TABLE (
@@ -806,7 +837,9 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
+-- End of procedures
 --@block
+-- Procedure: Remove FD After Maturity
 DROP FUNCTION IF EXISTS remove_fd_after_maturity();
 
 CREATE OR REPLACE FUNCTION remove_fd_after_maturity()
@@ -850,3 +883,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 --@block
+SELECT * FROM remove_fd_after_maturity()
+--@block
+select * from savingsaccounts

@@ -158,9 +158,8 @@ export const getAccinfo = async (client, account_no) => {
     const { rows } = await client.query(
         `SELECT sa.* 
          FROM savingsaccounts sa
-         JOIN accountholders ah ON sa.account_no = ah.account_no
-         WHERE sa.account_no = $1 AND UPPER(ah.customer_nic) = $2`,
-        [account_no, customer_nic.toUpperCase()]
+         WHERE sa.account_no = $1`,
+        [account_no]
     );
     return rows[0];
 };
@@ -220,14 +219,7 @@ export const createFixedDepositeAccount = async (client, account_no, fd_plan_id,
 // Make deposit to account
 export const makeDepositeAccount = async (client, account_no, amount, agent_id, customer_nic) => {
     await client.query(`SET LOCAL app.current_user_id = '${agent_id}'`);
-    // Verify NIC matches account holder
-    const { rows: holderRows } = await client.query(
-        'SELECT 1 FROM accountholders WHERE account_no = $1 AND UPPER(customer_nic) = $2',
-        [account_no, customer_nic.toUpperCase()]
-    );
-    if (holderRows.length === 0) {
-        throw new Error('NIC does not match account holder');
-    }
+    
     await client.query(
         'UPDATE savingsaccounts SET balance = balance + $1, updated_at = NOW() WHERE account_no = $2',
         [amount, account_no]
@@ -245,14 +237,7 @@ export const makeDepositeAccount = async (client, account_no, amount, agent_id, 
 // Make withdrawal from account
 export const makeWithdrawAccount = async (client, account_no, amount, agent_id, customer_nic) => {
     await client.query(`SET LOCAL app.current_user_id = '${agent_id}'`);
-    // Verify NIC matches account holder
-    const { rows: holderRows } = await client.query(
-        'SELECT 1 FROM accountholders WHERE account_no = $1 AND UPPER(customer_nic) = $2',
-        [account_no, customer_nic.toUpperCase()]
-    );
-    if (holderRows.length === 0) {
-        throw new Error('NIC does not match account holder');
-    }
+    
     await client.query(
         'UPDATE savingsaccounts SET balance = balance - $1, updated_at = NOW() WHERE account_no = $2',
         [amount, account_no]
@@ -535,20 +520,18 @@ export const deleteSavingsAccountByNIC = async (client, account_no, customer_nic
 export const deleteSavingsAccountByAccountNo = async (client, account_no, agent_id, isCustomerRequest = false) => {
     await client.query(`SET LOCAL app.current_user_id = '${agent_id}'`);
     
-    // Require NIC for deactivation
-    throw new Error('NIC is required for deactivation. Use deleteSavingsAccountByNIC instead.');
-    // Normalize NIC: trim and uppercase
-    const normalizedNic = (customer_nic || '').trim().toUpperCase();
     const { rows } = await client.query(
-        `UPDATE savingsaccounts SET active_status = true WHERE account_no = $1 AND account_no IN (
-            SELECT ah.account_no FROM accountholders ah WHERE UPPER(TRIM(ah.customer_nic)) = $2
-        ) RETURNING *`,
-        [account_no, normalizedNic]
+        `UPDATE savingsaccounts 
+         SET active_status = false, 
+             deleted_by_customer = $2 
+         WHERE account_no = $1 
+         RETURNING *`,
+        [account_no, isCustomerRequest]
     );
+    
     if (rows.length === 0) {
-        throw new Error('Savings account not found or NIC does not match account holder');
+        throw new Error('Savings account not found');
     }
-    return rows[0];
     
     return rows[0];
 };
