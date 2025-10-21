@@ -495,8 +495,8 @@ export const reactivateCustomerByNIC = async (client, agent_id, nic) => {
 };
 
 // Delete (deactivate) savings account
-export const deleteSavingsAccountByNIC = async (client, account_no, customer_nic, agent_id, isCustomerRequest = false) => {
-    await client.query(`SET LOCAL app.current_user_id = '${agent_id}'`);
+export const deleteSavingsAccountByNIC = async (client, account_no, customer_nic, agentId, isCustomerRequest = false) => {
+    await client.query(`SET LOCAL app.current_user_id = '${agentId}'`);
     
     // Normalize NIC: trim and uppercase
     const normalizedNic = (customer_nic || '').trim().toUpperCase();
