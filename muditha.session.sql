@@ -474,11 +474,11 @@ BEGIN
     BEGIN
         user_id_value := current_setting('app.current_user_id', true)::INT;
         IF user_id_value IS NULL THEN
-            user_id_value := 1;
+            user_id_value := 2;
         END IF;
     EXCEPTION
         WHEN OTHERS THEN
-            user_id_value := 0;  -- Default to SYSTEM user
+            user_id_value := 2;  -- Default to SYSTEM user
     END;
 
     IF TG_OP = 'INSERT' THEN
