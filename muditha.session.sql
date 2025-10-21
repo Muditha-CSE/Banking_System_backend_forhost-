@@ -408,7 +408,7 @@ CREATE INDEX idx_account_no_acc_to_acc_receiver
 ON acc_to_acc_transactions(receiver_account_no);
 
 --@block
-CREATE TYPE cash_direction AS ENUM ('deposit','withdrawal')
+CREATE TYPE cash_direction AS ENUM ('deposit','withdraw')
 
 --@block
 CREATE TABLE acc_to_hand_transactions(
@@ -829,7 +829,7 @@ BEGIN
         transaction_done_by, status, transaction_date, transaction_requested_by
     )
     VALUES (p_amount, p_sender_account_no, p_receiver_account_no, p_agent_id, 'completed', NOW(), p_sender_nic)
-    RETURNING transaction_id INTO v_transaction_id;
+    RETURNING acc_to_acc_transactions.transaction_id INTO v_transaction_id;
     RETURN QUERY SELECT v_transaction_id, 'SUCCESS'::VARCHAR, 'Transfer completed'::VARCHAR;
 EXCEPTION
     WHEN OTHERS THEN
