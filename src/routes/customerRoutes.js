@@ -8,7 +8,7 @@ const router = Router();
 router.get('/getCustomerDetails/:nic', authMiddleware.authenticateRole(['customer']), getCustomerDetails);
 
 // Delete (deactivate) savings account by customer
-router.delete('/savingsaccounts/:accountNo', authMiddleware.authenticateRole(['customer']), deleteSavingsAccountByCustomerController);
+router.delete('/savingsaccounts/:accountNo', authMiddleware.authenticateRole(['agent']), deleteSavingsAccountByCustomerController);
 
 // Moved from manageCustRoutes: agent-only endpoints to manage customers
 router.post(
